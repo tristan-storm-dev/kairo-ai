@@ -3,11 +3,13 @@ type KickPrediction = {
   probs: [number, number]
 }
 
+import { HUGGINGFACE_API_KEY } from '@env'
+
 export const AI_ENDPOINT = 'https://api-inference.huggingface.co/models/facebook/bart-large-mnli'
 
-const HUGGINGFACE_API_KEY = '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'
-
-function clamp01(v: number) { return Math.max(0, Math.min(1, v)) }
+function clamp01(v: number) {
+  return Math.max(0, Math.min(1, v))
+}
 
 function featuresToText(f: number[]) {
   const speed = f[0] || 0
@@ -29,7 +31,6 @@ function computePriors(f: number[]) {
   const dist = f[4] || 0
   const jagged = f[6] || 0
   const axis = f[7] || 0
-
   const smoothPrior = clamp01((1 - jagged) * (1 - axis) * (1 - 0.6 * angleVar) * (1 - 0.3 * speed))
   const hardPrior = clamp01(axis * (0.4 + 0.6 * dist) + 0.5 * jagged * angleVar)
   const sum = smoothPrior + hardPrior || 1
@@ -42,7 +43,6 @@ function computePriors(f: number[]) {
 export async function analyzeKickRemote(features: number[]): Promise<KickPrediction> {
   const text = featuresToText(features)
   const priors = computePriors(features)
-
   const response = await fetch(AI_ENDPOINT, {
     method: 'POST',
     headers: {
@@ -57,32 +57,24 @@ export async function analyzeKickRemote(features: number[]): Promise<KickPredict
       },
     }),
   })
-
   const raw = await response.text()
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${raw}`)
-
   let data: any
   try {
     data = JSON.parse(raw)
   } catch {
     throw new Error(`Invalid JSON: ${raw.slice(0, 160)}`)
   }
-
   const labels: string[] = data?.labels || []
   const scores: number[] = data?.scores || []
-  if (!Array.isArray(labels) || !Array.isArray(scores) || labels.length !== scores.length || labels.length === 0) {
+  if (!Array.isArray(labels) || !Array.isArray(scores) || labels.length !== scores.length || labels.length === 0)
     throw new Error('Unexpected HF response shape')
-  }
-
   const idxSmooth = labels.findIndex((l) => l.toLowerCase().includes('smooth'))
   const idxHard = labels.findIndex((l) => l.toLowerCase().includes('hard'))
-
   const smoothHF = idxSmooth >= 0 ? clamp01(scores[idxSmooth]) : 0.5
   const hardHF = idxHard >= 0 ? clamp01(scores[idxHard]) : 0.5
-
   let smooth = smoothHF * (0.2 + 0.8 * priors.smooth)
   let hard = hardHF * (0.2 + 0.8 * priors.hard)
-
   const sum = smooth + hard || 1
   const probs: [number, number] = [smooth / sum, hard / sum]
   const maxIdx = probs.indexOf(Math.max(...probs))
