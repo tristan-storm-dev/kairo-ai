@@ -1,191 +1,180 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { tabIndicatorColors } from '../theme';
+import React, { useRef, useState } from 'react'
+import { View, Text, StyleSheet, Pressable, Dimensions, Animated, Easing, Platform } from 'react-native'
+import { theme, fontFamilyBody, fontFamilyHeadline, tabIndicatorColors } from '../theme'
+import DotGrid from '../components/DotGrid'
+import { useNavigation } from '@react-navigation/native'
+import { LinearGradient } from 'expo-linear-gradient'
+import { Feather } from '@expo/vector-icons'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import * as Haptics from 'expo-haptics'
 
-interface DotGridProps {
-  rows?: number;
-  cols?: number;
-  dotSize?: number;
-  gap?: number;
-  color?: string;
-  fps?: number;
-  radius?: number;
-  amplitude?: number;
-  freq?: number;
-}
+export default function HomeScreen() {
+  const navigation = useNavigation<any>()
 
-export default function DotGrid({
-  rows = 6,
-  cols = 6,
-  dotSize = 10,
-  gap = 10,
-  color = '#ffffff',
-  fps = 60,
-  radius = 2,
-  amplitude = 0.35,
-  freq = 0.35,
-}: DotGridProps) {
-  const count = rows * cols;
-  const baseColor = color;
+  const [showInfo, setShowInfo] = useState(false)
+  const [gridW, setGridW] = useState(0)
+  const [gridH, setGridH] = useState(0)
 
-  const phaseRef = useRef(0);
-  const runningRef = useRef(true);
-  const rafIdRef = useRef<number | null>(null);
+  const screenH = Dimensions.get('window').height
 
-  const width = cols * dotSize + (cols - 1) * gap;
-  const height = rows * dotSize + (rows - 1) * gap;
-
-  const indexAt = (r: number, c: number) => r * cols + c;
-  const nowTime = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
-
-  function hexToRgb(hex: string) {
-    const h = hex.replace('#', '');
-    const bigint = parseInt(h, 16);
-    const r = (bigint >> 16) & 255;
-    const g = (bigint >> 8) & 255;
-    const b = bigint & 255;
-    return { r, g, b };
-  }
-  function rgbToHex(r: number, g: number, b: number) {
-    const toHex = (n: number) => n.toString(16).padStart(2, '0');
-    return `#${toHex(Math.round(r))}${toHex(Math.round(g))}${toHex(Math.round(b))}`;
+  const [ghostMinTextW, setGhostMinTextW] = useState<number | null>(null)
+  const BTN_INNER_PAD = 16
+  const onGhostTextLayout = (e: any) => {
+    const w = e?.nativeEvent?.layout?.width ?? 0
+    if (w > 0) setGhostMinTextW((prev) => (prev == null ? w : Math.max(prev, w)))
   }
 
-  const stopsRgb = useMemo(() => tabIndicatorColors.map(hexToRgb), []);
-  const columnColorsRgb = useMemo(() => {
-    if (cols <= 1) return [stopsRgb[0] ?? hexToRgb(baseColor)];
-    const out: { r: number; g: number; b: number }[] = new Array(cols);
-    for (let c = 0; c < cols; c++) {
-      const t = c / (cols - 1);
-      const seg = (stopsRgb.length - 1) * Math.max(0, Math.min(1, t));
-      const i = Math.floor(seg);
-      const frac = seg - i;
-      const a = stopsRgb[i];
-      const b = stopsRgb[Math.min(i + 1, stopsRgb.length - 1)];
-      out[c] = {
-        r: a.r + (b.r - a.r) * frac,
-        g: a.g + (b.g - a.g) * frac,
-        b: a.b + (b.b - a.b) * frac,
-      };
-    }
-    return out;
-  }, [cols, stopsRgb, baseColor]);
-  const baseRgb = useMemo(() => hexToRgb(baseColor), [baseColor]);
-
-  const [colors, setColors] = useState<string[]>(() => Array.from({ length: count }, () => baseColor));
-  const [scales, setScales] = useState<number[]>(() => Array.from({ length: count }, () => 1));
-  const colorsBufRef = useRef<string[]>(colors.slice());
-  const scalesBufRef = useRef<number[]>(scales.slice());
-
-  useEffect(() => {
-    const len = rows * cols;
-    setColors(Array.from({ length: len }, () => baseColor));
-    setScales(Array.from({ length: len }, () => 1));
-    colorsBufRef.current = Array.from({ length: len }, () => baseColor);
-    scalesBufRef.current = Array.from({ length: len }, () => 1);
-    phaseRef.current = 0;
-  }, [rows, cols, baseColor]);
-
-  useEffect(() => {
-    runningRef.current = true;
-    let last = nowTime();
-    let accum = 0;
-    const frameInterval = 1 / Math.max(24, Math.min(60, fps));
-
-    const loop = () => {
-      if (!runningRef.current) return;
-      const now = nowTime();
-      const dt = (now - last) / 1000;
-      last = now;
-      accum += dt;
-
-      phaseRef.current += freq * 2 * Math.PI * dt;
-
-      if (accum >= frameInterval) {
-        accum -= frameInterval;
-        const mid = (rows - 1) / 2;
-        const waveCycles = 1;
-        const k = (2 * Math.PI * waveCycles) / (cols > 1 ? cols : 1);
-
-        const maxAmp = ((rows - 1) / 2) - 1;
-        const ampBase = Math.min(maxAmp, Math.max(1, amplitude * rows * 0.5));
-        const ampNow = ampBase * (1 + 0.25 * Math.sin((now / 1000) * freq * 0.7 * 2 * Math.PI));
-
-        const thickness = Math.max(0.25, radius * 0.35);
-
-        const yCurveCol = new Array(cols);
-        for (let c = 0; c < cols; c++) {
-          yCurveCol[c] = mid + ampNow * Math.sin(phaseRef.current + c * k);
-        }
-
-        const breath = 1 + 0.12 * Math.sin((now / 1000) * freq * 2 * Math.PI);
-        const colorsBuf = colorsBufRef.current;
-        const scalesBuf = scalesBufRef.current;
-
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const idx = indexAt(r, c);
-            const yCurve = yCurveCol[c];
-            const distRow = Math.abs(r - yCurve);
-            const sigma = thickness * 0.6;
-            const tBlend = Math.exp(-(distRow * distRow) / (2 * sigma * sigma));
-            const col = columnColorsRgb[c] || baseRgb;
-            const rCol = baseRgb.r + (col.r - baseRgb.r) * tBlend;
-            const gCol = baseRgb.g + (col.g - baseRgb.g) * tBlend;
-            const bCol = baseRgb.b + (col.b - baseRgb.b) * tBlend;
-            colorsBuf[idx] = rgbToHex(rCol, gCol, bCol);
-            scalesBuf[idx] = 0.98 + 0.18 * tBlend * breath;
-          }
-        }
-
-        setColors(colorsBuf.slice());
-        setScales(scalesBuf.slice());
-      }
-      rafIdRef.current = requestAnimationFrame(loop);
-    };
-
-    rafIdRef.current = requestAnimationFrame(loop);
-    return () => {
-      runningRef.current = false;
-      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
-    };
-  }, [rows, cols, fps, radius, freq, baseColor, amplitude, columnColorsRgb]);
-
-  const dots: React.ReactNode[] = [];
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const left = c * (dotSize + gap);
-      const top = r * (dotSize + gap);
-      const idx = indexAt(r, c);
-      dots.push(
-        <View
-          key={`${r}-${c}`}
-          style={[
-            styles.dot,
-            {
-              left,
-              top,
-              width: dotSize,
-              height: dotSize,
-              borderRadius: dotSize / 2,
-              backgroundColor: colors[idx] || baseColor,
-              transform: [{ scale: scales[idx] || 1 }],
-            },
-          ]}
-        />
-      );
+  const handleHaptic = () => {
+    if (Platform.OS !== 'web') {
+      Haptics.selectionAsync().catch(() => {})
     }
   }
+
+  const mainY = useRef(new Animated.Value(0)).current
+  const panelY = useRef(new Animated.Value(screenH)).current
+
+  const handleExplorePress = React.useCallback(() => {
+    handleHaptic()
+    navigation.navigate('Lab')
+  }, [navigation])
+
+
+
+
+
+
+
+  const openInfo = () => {
+    setShowInfo(true)
+    panelY.setValue(screenH)
+    Animated.parallel([
+      Animated.timing(mainY, {
+        toValue: -screenH,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(panelY, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start()
+  }
+
+  const closeInfo = () => {
+    Animated.parallel([
+      Animated.timing(mainY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(panelY, {
+        toValue: screenH,
+        duration: 260,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setShowInfo(false)
+    })
+  }
+
+  const dot = 12
+  const gap = 12
+  const cells = gridW > 0 && gridH > 0 ? Math.max(4, Math.floor(Math.min(gridW, gridH) / (dot + gap))) : 6
+  const rows = cells
+  const cols = cells
 
   return (
-    <View style={{ width, height }}>
-      {dots}
+    <View style={styles.container}>
+      <Animated.View style={[{ flex: 1, backgroundColor: theme.bg }, { transform: [{ translateY: mainY }] }]}>        
+        <View style={styles.sectionTop} />
+        <View style={styles.sectionHero}>
+          <Text style={styles.headline}>kairo</Text>
+          <Text style={styles.tagline}>turn chaos to sound</Text>
+        </View>
+        <View style={styles.sectionGrid}>
+          <View
+            style={styles.gridBox}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout
+              setGridW(width)
+              setGridH(height)
+            }}
+          >
+            <DotGrid rows={rows} cols={cols} dotSize={dot} gap={gap} color={'#ffffff'} radius={4} amplitude={0.35} freq={0.35} fps={24} />
+          </View>
+        </View>
+        <View style={styles.sectionButtons}>
+          <View style={styles.buttonsRow}>
+            <Pressable
+              style={({ pressed }) => [styles.btnPrimary, pressed && styles.btnPressed]}
+              onPress={handleExplorePress}
+            >
+              <Text style={styles.btnPrimaryText}>Explore Lab</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.btnGhostWrap, pressed && styles.btnPressed]}
+              onPress={() => { handleHaptic(); if (!showInfo) openInfo() }}
+            >
+              <View style={styles.strokeGradientWrap}>
+                <LinearGradient colors={tabIndicatorColors as unknown as readonly [string, string, ...string[]]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.strokeGradientFill} />
+              </View>
+              <View style={[styles.btnGhostInner, ghostMinTextW != null ? { minWidth: ghostMinTextW + BTN_INNER_PAD * 2 } : null]}>
+                <Text style={styles.btnGhostText} onLayout={onGhostTextLayout}>how it works</Text>
+              </View>
+            </Pressable>
+          </View>
+        </View>
+        <View style={styles.sectionBottom} />
+      </Animated.View>
+      {showInfo && (
+        <Animated.View style={[styles.infoPanel, { transform: [{ translateY: panelY }] }]}>          
+          <SafeAreaView style={{ flex: 1 }}>
+            <View style={styles.infoTop}>
+              <Pressable
+                style={styles.chevronWrap}
+                onPress={() => { handleHaptic(); closeInfo(); }}
+                hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}
+              >
+                <Feather name="chevron-down" size={28} color={theme.fg} />
+              </Pressable>
+            </View>
+            <View style={styles.infoCenter} />
+            <View style={styles.infoBottom} />
+          </SafeAreaView>
+        </Animated.View>
+      )}
+
     </View>
-  );
+  )
 }
 
 const styles = StyleSheet.create({
-  dot: {
-    position: 'absolute',
-  },
-});
+  container: { flex: 1, backgroundColor: theme.bg },
+  sectionTop: { flex: 10 },
+  sectionHero: { flex: 20, alignItems: 'center', justifyContent: 'center' },
+  headline: { color: theme.fg, fontSize: 42, fontFamily: fontFamilyHeadline, letterSpacing: 1.2, textTransform: 'lowercase' },
+  tagline: { color: theme.fg, fontSize: 14, fontFamily: fontFamilyBody, opacity: 0.8, marginTop: 6, letterSpacing: 0.8, textTransform: 'lowercase' },
+  sectionGrid: { flex: 38, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
+  gridBox: { flex: 1, width: '100%', alignItems: 'center', justifyContent: 'center' },
+  sectionButtons: { flex: 15, alignItems: 'center', justifyContent: 'center' },
+  buttonsRow: { flexDirection: 'row', gap: 12, alignItems: 'center', justifyContent: 'center' },
+  btnPrimary: { backgroundColor: theme.fg, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 999 },
+  btnPrimaryText: { color: theme.bg, fontFamily: fontFamilyBody, textTransform: 'lowercase', letterSpacing: 0.8, fontSize: 14 },
+  btnGhostWrap: { borderRadius: 999, overflow: 'hidden', position: 'relative', padding: 2 },
+  strokeGradientWrap: { ...StyleSheet.absoluteFillObject, borderRadius: 999, overflow: 'hidden' },
+  strokeGradientFill: { ...StyleSheet.absoluteFillObject, borderRadius: 999 },
+  btnGhostInner: { borderRadius: 999, backgroundColor: theme.bg, paddingVertical: 10, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  btnGhostText: { color: theme.fg, fontFamily: fontFamilyBody, textTransform: 'lowercase', letterSpacing: 0.8, fontSize: 14 },
+  btnPressed: { opacity: 0.85 },
+  sectionBottom: { flex: 7 },
+  infoPanel: { position: 'absolute', left: 0, right: 0, bottom: 0, top: 0, backgroundColor: theme.bg, borderTopLeftRadius: 14, borderTopRightRadius: 14, overflow: 'hidden' },
+  infoTop: { height: 64, alignItems: 'center', justifyContent: 'center' },
+  chevronWrap: { width: 42, height: 42, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  infoCenter: { flex: 1 },
+  infoBottom: { height: 64 },
+})

@@ -39,6 +39,11 @@ export default function HomeScreen() {
   }, [navigation])
 
 
+
+
+
+
+
   const openInfo = () => {
     setShowInfo(true)
     panelY.setValue(screenH)
